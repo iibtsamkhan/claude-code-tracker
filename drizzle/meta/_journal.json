@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1772676027359,
+      "tag": "0000_striped_hawkeye",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1772676267886,
+      "tag": "0001_futuristic_triton",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1772739000000,
+      "tag": "0002_brisk_observer",
+      "breakpoints": true
+    }
+  ]
+}
