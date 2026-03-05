@@ -3,14 +3,14 @@
   "buildCommand": "pnpm run build",
   "outputDirectory": "dist/public",
   "functions": {
-    "api/index.ts": {
+    "api/index.js": {
       "maxDuration": 30
     }
   },
   "routes": [
     {
       "src": "/api/(.*)",
-      "dest": "/api/index.ts"
+      "dest": "/api/index.js"
     },
     {
       "handle": "filesystem"

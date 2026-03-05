@@ -1,19 +1,20 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { lazy, Suspense } from "react";
+import { Suspense } from "react";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { useAuth } from "./_core/hooks/useAuth";
 import { Loader2 } from "lucide-react";
+import { lazyWithRetry } from "./lib/lazyWithRetry";
 
-const Home = lazy(() => import("./pages/Home"));
-const Dashboard = lazy(() => import("./pages/Dashboard"));
-const Settings = lazy(() => import("./pages/Settings"));
-const SignInPage = lazy(() => import("./pages/SignIn"));
-const SignUpPage = lazy(() => import("./pages/SignUp"));
-const SSOCallbackPage = lazy(() => import("./pages/SSOCallback"));
-const NotFound = lazy(() => import("./pages/NotFound"));
+const Home = lazyWithRetry(() => import("./pages/Home"), "home");
+const Dashboard = lazyWithRetry(() => import("./pages/Dashboard"), "dashboard");
+const Settings = lazyWithRetry(() => import("./pages/Settings"), "settings");
+const SignInPage = lazyWithRetry(() => import("./pages/SignIn"), "sign-in");
+const SignUpPage = lazyWithRetry(() => import("./pages/SignUp"), "sign-up");
+const SSOCallbackPage = lazyWithRetry(() => import("./pages/SSOCallback"), "sso-callback");
+const NotFound = lazyWithRetry(() => import("./pages/NotFound"), "not-found");
 
 function FullScreenSpinner() {
   return (
