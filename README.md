@@ -1,4 +1,4 @@
-# AI Cost Tracker
+# Claude Code Tracker
 
 AI usage cost analytics platform with project-scoped ingestion, dashboard analytics, filtering, exports, and privacy guardrails.
 
