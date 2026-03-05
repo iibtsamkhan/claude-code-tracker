@@ -1,9 +1,8 @@
 import "dotenv/config";
-import { createApp } from "./app";
+import { createVercelApp } from "./vercelApp";
 
-const appPromise = createApp();
+const app = createVercelApp();
 
 export default async function handler(req: any, res: any) {
-  const app = await appPromise;
   return app(req, res);
 }
