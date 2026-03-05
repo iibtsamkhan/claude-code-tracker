@@ -6,7 +6,7 @@ import { ClerkProvider } from "@clerk/react";
 import { createRoot } from "react-dom/client";
 import superjson from "superjson";
 import App from "./App";
-import { getLoginUrl } from "./const";
+import { getLoginUrl, SIGN_IN_PATH, SIGN_UP_PATH } from "./const";
 import { assertNoThirdPartyEgress } from "./lib/networkPolicy";
 import "./index.css";
 
@@ -79,8 +79,8 @@ if (!clerkPublishableKey) {
 createRoot(document.getElementById("root")!).render(
   <ClerkProvider
     publishableKey={clerkPublishableKey}
-    signInUrl={import.meta.env.VITE_CLERK_SIGN_IN_URL || "/sign-in"}
-    signUpUrl={import.meta.env.VITE_CLERK_SIGN_UP_URL || "/sign-up"}
+    signInUrl={SIGN_IN_PATH}
+    signUpUrl={SIGN_UP_PATH}
     signInFallbackRedirectUrl="/dashboard"
     signUpFallbackRedirectUrl="/dashboard"
     afterSignOutUrl="/"

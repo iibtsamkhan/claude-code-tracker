@@ -37,6 +37,27 @@ describe("Claude History Parser", () => {
     expect(result.success).toBe(false);
   });
 
+  it("should parse Claude conversation export object", () => {
+    const mockData = {
+      conversations: [
+        {
+          uuid: "claude-conv-1",
+          model: "claude-3-5-sonnet",
+          created_at: "2026-03-05T00:00:00Z",
+          chat_messages: [
+            { sender: "human", text: "hello from user" },
+            { sender: "assistant", text: "hello from claude" },
+          ],
+        },
+      ],
+    };
+
+    const result = parseClaudeHistory(JSON.stringify(mockData));
+    expect(result.success).toBe(true);
+    expect(result.provider).toBe("claude");
+    expect(result.entries.length).toBeGreaterThan(0);
+  });
+
   it("should calculate cost correctly", () => {
     const mockData = [
       {
@@ -140,6 +161,37 @@ describe("OpenAI History Parser", () => {
     expect(result.entries[0].inputTokens).toBe(0);
     expect(result.entries[0].outputTokens).toBe(0);
   });
+
+  it("should parse OpenAI conversation mapping export", () => {
+    const mockData = {
+      conversations: [
+        {
+          id: "openai-conv-1",
+          model_slug: "gpt-4o",
+          create_time: 1741132800,
+          mapping: {
+            n1: {
+              message: {
+                author: { role: "user" },
+                content: { parts: ["How do I optimize prompts?"] },
+              },
+            },
+            n2: {
+              message: {
+                author: { role: "assistant" },
+                content: { parts: ["Use concise instructions and examples."] },
+              },
+            },
+          },
+        },
+      ],
+    };
+
+    const result = parseOpenAIHistory(JSON.stringify(mockData));
+    expect(result.success).toBe(true);
+    expect(result.provider).toBe("openai");
+    expect(result.entries.length).toBeGreaterThan(0);
+  });
 });
 
 describe("Gemini History Parser", () => {
@@ -163,6 +215,27 @@ describe("Gemini History Parser", () => {
   it("should reject non-array payload", () => {
     const result = parseGeminiHistory(JSON.stringify({ bad: true }));
     expect(result.success).toBe(false);
+  });
+
+  it("should parse Gemini conversation export object", () => {
+    const mockData = {
+      conversations: [
+        {
+          id: "gemini-conv-1",
+          model: "gemini-1.5-pro",
+          created_at: "2026-03-05T00:00:00Z",
+          contents: [
+            { role: "user", parts: [{ text: "Summarize this article" }] },
+            { role: "model", parts: [{ text: "Here is your summary." }] },
+          ],
+        },
+      ],
+    };
+
+    const result = parseGeminiHistory(JSON.stringify(mockData));
+    expect(result.success).toBe(true);
+    expect(result.provider).toBe("gemini");
+    expect(result.entries.length).toBeGreaterThan(0);
   });
 });
 

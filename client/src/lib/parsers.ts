@@ -1,6 +1,7 @@
 /**
  * AI Provider History File Parsers
- * Handles parsing and validation of usage history files from different AI providers
+ * Handles parsing and validation of usage and conversation-export files
+ * from Claude, OpenAI, and Gemini.
  */
 
 import type { AIProvider, UsageEntryInput } from "@shared/usage";
@@ -19,6 +20,8 @@ export interface ParserResult {
     totalCost: number;
   };
 }
+
+type JsonObject = Record<string, unknown>;
 
 const CLAUDE_PRICING: Record<string, { input: number; output: number }> = {
   "claude-3-5-sonnet": { input: 0.003, output: 0.015 },
@@ -44,6 +47,58 @@ const GEMINI_PRICING: Record<string, { input: number; output: number }> = {
   "gemini-1.5-flash": { input: 0.000075, output: 0.0003 },
 };
 
+function isObject(value: unknown): value is JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readPath(value: unknown, path: string[]): unknown {
+  let current: unknown = value;
+  for (const key of path) {
+    if (!isObject(current)) return undefined;
+    current = current[key];
+  }
+  return current;
+}
+
+function firstString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
+function safeNumber(value: unknown, fallback: number = 0): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return n;
+}
+
+function safeDate(value: unknown): Date | null {
+  if (value === null || value === undefined || value === "") return null;
+
+  if (typeof value === "number") {
+    const millis = value > 1_000_000_000_000 ? value : value * 1000;
+    const date = new Date(millis);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const text = String(value).trim();
+  if (!text) return null;
+
+  if (/^\d+(\.\d+)?$/.test(text)) {
+    const numeric = Number(text);
+    if (!Number.isFinite(numeric)) return null;
+    const millis = numeric > 1_000_000_000_000 ? numeric : numeric * 1000;
+    const date = new Date(millis);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function getModelPrice(provider: AIProvider, model: string): { input: number; output: number } {
   const pricing = {
     claude: CLAUDE_PRICING,
@@ -63,18 +118,6 @@ function getModelPrice(provider: AIProvider, model: string): { input: number; ou
   }
 
   return { input: 0.001, output: 0.002 };
-}
-
-function safeNumber(value: unknown, fallback: number = 0): number {
-  const n = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(n) || n < 0) return fallback;
-  return n;
-}
-
-function safeDate(value: unknown): Date | null {
-  if (!value) return null;
-  const date = new Date(String(value));
-  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function calculateCost(
@@ -100,142 +143,300 @@ function buildStats(entries: ParsedUsageEntry[]): ParserResult["stats"] {
   };
 }
 
-export function parseClaudeHistory(fileContent: string): ParserResult {
+function normalizeRootArray(data: unknown): unknown[] | null {
+  if (Array.isArray(data)) return data;
+  if (!isObject(data)) return null;
+
+  const containerKeys = ["conversations", "items", "data", "history", "chats"];
+  for (const key of containerKeys) {
+    const value = data[key];
+    if (Array.isArray(value)) return value;
+  }
+
+  return null;
+}
+
+function extractTextPayload(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    return value.map(extractTextPayload).join(" ").trim();
+  }
+  if (isObject(value)) {
+    const direct = firstString(value.text, value.content);
+    if (direct) return direct;
+
+    const parts = readPath(value, ["parts"]);
+    if (Array.isArray(parts)) {
+      const text = parts.map(extractTextPayload).join(" ").trim();
+      if (text) return text;
+    }
+
+    const nestedContent = readPath(value, ["content", "parts"]);
+    if (Array.isArray(nestedContent)) {
+      const text = nestedContent.map(extractTextPayload).join(" ").trim();
+      if (text) return text;
+    }
+  }
+
+  return "";
+}
+
+function estimateTokensFromText(text: string): number {
+  const normalized = text.trim();
+  if (!normalized) return 0;
+  return Math.ceil(normalized.length / 4);
+}
+
+function extractMessageArray(item: JsonObject): unknown[] {
+  const directArrays = [
+    item.messages,
+    item.chat_messages,
+    item.turns,
+    item.contents,
+    item.events,
+  ];
+  for (const candidate of directArrays) {
+    if (Array.isArray(candidate)) return candidate;
+  }
+
+  const mapping = item.mapping;
+  if (isObject(mapping)) {
+    return Object.values(mapping);
+  }
+
+  return [];
+}
+
+function estimateTokensFromMessages(item: JsonObject): {
+  inputTokens: number;
+  outputTokens: number;
+  messageCount: number;
+} {
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let messageCount = 0;
+
+  const messages = extractMessageArray(item);
+  for (const raw of messages) {
+    if (!isObject(raw)) continue;
+
+    const role = firstString(
+      raw.role,
+      raw.sender,
+      readPath(raw, ["author", "role"]),
+      readPath(raw, ["message", "author", "role"]),
+    )?.toLowerCase();
+
+    const text = extractTextPayload(
+      readPath(raw, ["message", "content"]) ??
+        raw.content ??
+        raw.text ??
+        readPath(raw, ["parts"]) ??
+        readPath(raw, ["content", "parts"]),
+    );
+    const tokens = estimateTokensFromText(text);
+
+    if (tokens <= 0) continue;
+    messageCount += 1;
+
+    if (role === "assistant" || role === "model" || role === "claude") {
+      outputTokens += tokens;
+    } else {
+      inputTokens += tokens;
+    }
+  }
+
+  return { inputTokens, outputTokens, messageCount };
+}
+
+function readTokenUsage(item: JsonObject): { inputTokens: number; outputTokens: number; totalTokens: number } {
+  const inputTokens = safeNumber(
+    firstNonNull(
+      item.inputTokens,
+      item.input_tokens,
+      item.prompt_tokens,
+      readPath(item, ["usage", "inputTokens"]),
+      readPath(item, ["usage", "input_tokens"]),
+      readPath(item, ["usage", "prompt_tokens"]),
+      readPath(item, ["usageMetadata", "promptTokenCount"]),
+    ),
+    0,
+  );
+
+  const outputTokens = safeNumber(
+    firstNonNull(
+      item.outputTokens,
+      item.output_tokens,
+      item.completion_tokens,
+      readPath(item, ["usage", "outputTokens"]),
+      readPath(item, ["usage", "output_tokens"]),
+      readPath(item, ["usage", "completion_tokens"]),
+      readPath(item, ["usageMetadata", "candidatesTokenCount"]),
+    ),
+    0,
+  );
+
+  const totalTokens =
+    safeNumber(
+      firstNonNull(
+        item.totalTokens,
+        item.total_tokens,
+        readPath(item, ["usage", "totalTokens"]),
+        readPath(item, ["usage", "total_tokens"]),
+        readPath(item, ["usageMetadata", "totalTokenCount"]),
+      ),
+      inputTokens + outputTokens,
+    ) || inputTokens + outputTokens;
+
+  return { inputTokens, outputTokens, totalTokens };
+}
+
+function firstNonNull(...values: unknown[]): unknown {
+  for (const value of values) {
+    if (value !== undefined && value !== null) return value;
+  }
+  return undefined;
+}
+
+function hasProviderSignal(provider: AIProvider, item: JsonObject, model: string): boolean {
+  const modelLower = model.toLowerCase();
+  if (provider === "claude") {
+    return (
+      modelLower.includes("claude") ||
+      Array.isArray(item.chat_messages) ||
+      firstString(item.anthropic_id, item.claude_id) !== undefined
+    );
+  }
+  if (provider === "openai") {
+    return (
+      modelLower.includes("gpt") ||
+      item.prompt_tokens !== undefined ||
+      item.completion_tokens !== undefined ||
+      isObject(item.mapping) ||
+      firstString(item.request_id) !== undefined
+    );
+  }
+  return (
+    modelLower.includes("gemini") ||
+    item.input_tokens !== undefined ||
+    item.output_tokens !== undefined ||
+    readPath(item, ["usageMetadata", "promptTokenCount"]) !== undefined ||
+    readPath(item, ["usageMetadata", "candidatesTokenCount"]) !== undefined ||
+    Array.isArray(item.contents)
+  );
+}
+
+function parseProviderHistory(fileContent: string, provider: AIProvider): ParserResult {
   try {
-    const data = JSON.parse(fileContent);
-    if (!Array.isArray(data)) {
-      return { success: false, entries: [], error: "Invalid Claude history format: expected array" };
+    const raw = JSON.parse(fileContent);
+    const data = normalizeRootArray(raw);
+    if (!data) {
+      return {
+        success: false,
+        entries: [],
+        error: `Invalid ${provider} history format: expected array or object with conversations/items/data`,
+      };
     }
 
     const entries: ParsedUsageEntry[] = [];
-    for (const conversation of data) {
-      if (!conversation?.model || !conversation?.usage) continue;
-      const timestamp = safeDate(conversation.timestamp || conversation.created_at);
+
+    for (const row of data) {
+      if (!isObject(row)) continue;
+
+      const timestamp = safeDate(
+        firstNonNull(
+          row.timestamp,
+          row.created_at,
+          row.createdAt,
+          row.updated_at,
+          row.updatedAt,
+          row.create_time,
+          row.update_time,
+        ),
+      );
       if (!timestamp) continue;
 
-      const inputTokens = safeNumber(conversation.usage.inputTokens);
-      const outputTokens = safeNumber(conversation.usage.outputTokens);
-      const totalTokens = inputTokens + outputTokens;
-      const costUsd = calculateCost("claude", conversation.model, inputTokens, outputTokens);
+      const inferredModel = firstString(
+        row.model,
+        row.model_name,
+        row.model_slug,
+        readPath(row, ["metadata", "model"]),
+        provider === "claude"
+          ? "claude-3-5-sonnet"
+          : provider === "openai"
+            ? "gpt-4o-mini"
+            : "gemini-1.5-flash",
+      )!;
+
+      if (!hasProviderSignal(provider, row, inferredModel)) continue;
+
+      let { inputTokens, outputTokens, totalTokens } = readTokenUsage(row);
+      let estimatedFromMessages = false;
+      const messageEstimate = estimateTokensFromMessages(row);
+
+      if (inputTokens + outputTokens <= 0 && messageEstimate.inputTokens + messageEstimate.outputTokens > 0) {
+        inputTokens = messageEstimate.inputTokens;
+        outputTokens = messageEstimate.outputTokens;
+        totalTokens = inputTokens + outputTokens;
+        estimatedFromMessages = true;
+      }
+
+      const conversationId = firstString(row.id, row.uuid, row.conversation_id, row.conversationId);
+      const promptId = firstString(row.prompt_id, row.promptId, row.request_id);
+      const costUsd = calculateCost(provider, inferredModel, inputTokens, outputTokens);
 
       entries.push({
-        provider: "claude",
-        model: conversation.model,
-        conversationId: conversation.id || undefined,
+        provider,
+        model: inferredModel,
+        conversationId,
+        promptId,
         inputTokens,
         outputTokens,
         totalTokens,
         costUsd,
         timestamp,
         metadata: {
-          title: conversation.title,
-          messages: Array.isArray(conversation.messages) ? conversation.messages.length : 0,
+          title: firstString(row.title, row.name),
+          estimatedFromMessages,
+          messageCount: messageEstimate.messageCount,
         },
       });
     }
 
     if (entries.length === 0) {
-      return { success: false, entries: [], error: "No valid usage entries found in Claude history" };
+      return {
+        success: false,
+        entries: [],
+        error: `No valid usage entries found in ${provider} history`,
+      };
     }
 
-    return { success: true, provider: "claude", entries, stats: buildStats(entries) };
+    return {
+      success: true,
+      provider,
+      entries,
+      stats: buildStats(entries),
+    };
   } catch (error) {
     return {
       success: false,
       entries: [],
-      error: `Failed to parse Claude history: ${error instanceof Error ? error.message : "Unknown error"}`,
+      error: `Failed to parse ${provider} history: ${error instanceof Error ? error.message : "Unknown error"}`,
     };
   }
+}
+
+export function parseClaudeHistory(fileContent: string): ParserResult {
+  return parseProviderHistory(fileContent, "claude");
 }
 
 export function parseOpenAIHistory(fileContent: string): ParserResult {
-  try {
-    const data = JSON.parse(fileContent);
-    if (!Array.isArray(data)) {
-      return { success: false, entries: [], error: "Invalid OpenAI history format: expected array" };
-    }
-
-    const entries: ParsedUsageEntry[] = [];
-    for (const item of data) {
-      if (!item?.model) continue;
-      const timestamp = safeDate(item.timestamp || item.created_at);
-      if (!timestamp) continue;
-
-      const inputTokens = safeNumber(item.prompt_tokens);
-      const outputTokens = safeNumber(item.completion_tokens);
-      const totalTokens = safeNumber(item.total_tokens, inputTokens + outputTokens) || inputTokens + outputTokens;
-      const costUsd = calculateCost("openai", item.model, inputTokens, outputTokens);
-
-      entries.push({
-        provider: "openai",
-        model: item.model,
-        conversationId: item.conversation_id || undefined,
-        inputTokens,
-        outputTokens,
-        totalTokens,
-        costUsd,
-        timestamp,
-        metadata: { requestId: item.request_id },
-      });
-    }
-
-    if (entries.length === 0) {
-      return { success: false, entries: [], error: "No valid usage entries found in OpenAI history" };
-    }
-
-    return { success: true, provider: "openai", entries, stats: buildStats(entries) };
-  } catch (error) {
-    return {
-      success: false,
-      entries: [],
-      error: `Failed to parse OpenAI history: ${error instanceof Error ? error.message : "Unknown error"}`,
-    };
-  }
+  return parseProviderHistory(fileContent, "openai");
 }
 
 export function parseGeminiHistory(fileContent: string): ParserResult {
-  try {
-    const data = JSON.parse(fileContent);
-    if (!Array.isArray(data)) {
-      return { success: false, entries: [], error: "Invalid Gemini history format: expected array" };
-    }
-
-    const entries: ParsedUsageEntry[] = [];
-    for (const item of data) {
-      if (!item?.model) continue;
-      const timestamp = safeDate(item.timestamp || item.created_at);
-      if (!timestamp) continue;
-
-      const inputTokens = safeNumber(item.input_tokens);
-      const outputTokens = safeNumber(item.output_tokens);
-      const totalTokens = safeNumber(item.total_tokens, inputTokens + outputTokens) || inputTokens + outputTokens;
-      const costUsd = calculateCost("gemini", item.model, inputTokens, outputTokens);
-
-      entries.push({
-        provider: "gemini",
-        model: item.model,
-        conversationId: item.conversation_id || undefined,
-        inputTokens,
-        outputTokens,
-        totalTokens,
-        costUsd,
-        timestamp,
-        metadata: { requestId: item.request_id },
-      });
-    }
-
-    if (entries.length === 0) {
-      return { success: false, entries: [], error: "No valid usage entries found in Gemini history" };
-    }
-
-    return { success: true, provider: "gemini", entries, stats: buildStats(entries) };
-  } catch (error) {
-    return {
-      success: false,
-      entries: [],
-      error: `Failed to parse Gemini history: ${error instanceof Error ? error.message : "Unknown error"}`,
-    };
-  }
+  return parseProviderHistory(fileContent, "gemini");
 }
 
 export function parseHistoryFile(fileContent: string, filename?: string): ParserResult {
@@ -258,6 +459,7 @@ export function parseHistoryFile(fileContent: string, filename?: string): Parser
   return {
     success: false,
     entries: [],
-    error: `Unable to detect provider. Last error: ${gemini.error ?? openai.error ?? claude.error ?? "Unknown parser error"}`,
+    error:
+      "Unable to detect provider or parse usage entries. Use Claude/OpenAI/Gemini usage export JSON, or include provider name in filename (claude/openai/gemini).",
   };
 }
