@@ -8,6 +8,7 @@ export default function SignUpPage() {
         path="/sign-up"
         routing="path"
         signInUrl={getLoginUrl()}
+        fallbackRedirectUrl="/dashboard"
         forceRedirectUrl="/dashboard"
       />
     </div>

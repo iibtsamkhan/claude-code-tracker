@@ -81,6 +81,8 @@ createRoot(document.getElementById("root")!).render(
     publishableKey={clerkPublishableKey}
     signInUrl={import.meta.env.VITE_CLERK_SIGN_IN_URL || "/sign-in"}
     signUpUrl={import.meta.env.VITE_CLERK_SIGN_UP_URL || "/sign-up"}
+    signInFallbackRedirectUrl="/dashboard"
+    signUpFallbackRedirectUrl="/dashboard"
     afterSignOutUrl="/"
   >
     <trpc.Provider client={trpcClient} queryClient={queryClient}>

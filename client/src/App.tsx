@@ -12,6 +12,7 @@ const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Settings = lazy(() => import("./pages/Settings"));
 const SignInPage = lazy(() => import("./pages/SignIn"));
 const SignUpPage = lazy(() => import("./pages/SignUp"));
+const SSOCallbackPage = lazy(() => import("./pages/SSOCallback"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 function FullScreenSpinner() {
@@ -37,6 +38,9 @@ function Router() {
         <Route path="/settings" component={Settings} />
         <Route path="/sign-in" component={SignInPage} />
         <Route path="/sign-up" component={SignUpPage} />
+        <Route path="/sso-callback" component={SSOCallbackPage} />
+        <Route path="/sign-in/sso-callback" component={SSOCallbackPage} />
+        <Route path="/sign-up/sso-callback" component={SSOCallbackPage} />
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />
       </Switch>
