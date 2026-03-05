@@ -10,6 +10,8 @@ import { Loader2 } from "lucide-react";
 const Home = lazy(() => import("./pages/Home"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Settings = lazy(() => import("./pages/Settings"));
+const SignInPage = lazy(() => import("./pages/SignIn"));
+const SignUpPage = lazy(() => import("./pages/SignUp"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 function FullScreenSpinner() {
@@ -33,6 +35,8 @@ function Router() {
         <Route path="/" component={isAuthenticated ? Dashboard : Home} />
         <Route path="/dashboard" component={Dashboard} />
         <Route path="/settings" component={Settings} />
+        <Route path="/sign-in" component={SignInPage} />
+        <Route path="/sign-up" component={SignUpPage} />
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />
       </Switch>

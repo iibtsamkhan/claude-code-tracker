@@ -2,6 +2,7 @@ import { trpc } from "@/lib/trpc";
 import { UNAUTHED_ERR_MSG } from '@shared/const';
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { httpBatchLink, TRPCClientError } from "@trpc/client";
+import { ClerkProvider } from "@clerk/react";
 import { createRoot } from "react-dom/client";
 import superjson from "superjson";
 import App from "./App";
@@ -43,7 +44,7 @@ const trpcClient = trpc.createClient({
     httpBatchLink({
       url: "/api/trpc",
       transformer: superjson,
-      fetch(input, init) {
+      async fetch(input, init) {
         const requestUrl =
           typeof input === "string"
             ? input
@@ -51,8 +52,17 @@ const trpcClient = trpc.createClient({
               ? input.toString()
               : input.url;
         assertNoThirdPartyEgress(requestUrl, window.location.origin);
+
+        const headers = new Headers(init?.headers ?? {});
+        const clerk = (window as any).Clerk;
+        const sessionToken = await clerk?.session?.getToken?.();
+        if (sessionToken) {
+          headers.set("Authorization", `Bearer ${sessionToken}`);
+        }
+
         return globalThis.fetch(input, {
           ...(init ?? {}),
+          headers,
           credentials: "include",
         });
       },
@@ -60,10 +70,23 @@ const trpcClient = trpc.createClient({
   ],
 });
 
+const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined;
+
+if (!clerkPublishableKey) {
+  throw new Error("VITE_CLERK_PUBLISHABLE_KEY is required");
+}
+
 createRoot(document.getElementById("root")!).render(
-  <trpc.Provider client={trpcClient} queryClient={queryClient}>
-    <QueryClientProvider client={queryClient}>
-      <App />
-    </QueryClientProvider>
-  </trpc.Provider>
+  <ClerkProvider
+    publishableKey={clerkPublishableKey}
+    signInUrl={import.meta.env.VITE_CLERK_SIGN_IN_URL || "/sign-in"}
+    signUpUrl={import.meta.env.VITE_CLERK_SIGN_UP_URL || "/sign-up"}
+    afterSignOutUrl="/"
+  >
+    <trpc.Provider client={trpcClient} queryClient={queryClient}>
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>
+    </trpc.Provider>
+  </ClerkProvider>
 );

@@ -3,7 +3,6 @@ import type { Server } from "http";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
-import { registerOAuthRoutes } from "./oauth";
 import { serveStatic, setupVite } from "./vite";
 
 export async function createApp(server?: Server): Promise<Express> {
@@ -11,8 +10,6 @@ export async function createApp(server?: Server): Promise<Express> {
 
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
-
-  registerOAuthRoutes(app);
 
   app.use(
     "/api/trpc",
