@@ -234,7 +234,7 @@ export default function Dashboard() {
       <div className="space-y-6">
         <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h1 className="text-3xl font-bold">AI Cost Tracker</h1>
+            <h1 className="text-3xl font-bold">Claude Code Tracker</h1>
             <p className="text-muted-foreground mt-1">
               Persisted project analytics with filtering, exports, and detailed usage inspection.
             </p>
